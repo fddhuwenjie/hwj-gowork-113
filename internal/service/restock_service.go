@@ -196,6 +196,8 @@ func (s *RestockService) Accept(ctx context.Context, actor, id string, expectedV
 }
 
 // Reject 驳回回存验收单（必须给出原因）。
+// 验收通过（ACCEPTED）为不可逆终态：已创建新批次与谱系、完成繁育计划，
+// 不得再驳回；仅 PENDING 可转 REJECTED。
 func (s *RestockService) Reject(ctx context.Context, actor, id, reason string, expectedVersion int64) (*domain.RestockBatch, error) {
 	if err := requireNonEmpty("驳回原因", reason); err != nil {
 		return nil, err
@@ -211,11 +213,9 @@ func (s *RestockService) Reject(ctx context.Context, actor, id, reason string, e
 		if rb.Version != expectedVersion {
 			return apperr.OptimisticLock("回存验收单", id)
 		}
-		if rb.Status != domain.RestockPending && rb.Status != domain.RestockAccepted {
-			return apperr.Statef("回存验收单状态 %s 不允许驳回", rb.Status)
-		}
-		if rb.Status == domain.RestockAccepted {
-			rb.NewBatchID = ""
+		// 状态机校验：仅 PENDING 可驳回；ACCEPTED 已终态化，禁止再驳回。
+		if err := domain.MustTransition("restock", string(rb.Status), string(domain.RestockRejected)); err != nil {
+			return err
 		}
 		if err := s.base.repos.Restock.UpdateStatus(ctx, tx, rb.ID, domain.RestockRejected, "", reason, rb.Version, now); err != nil {
 			return err

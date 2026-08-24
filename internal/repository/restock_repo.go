@@ -77,9 +77,10 @@ func scanRestock(row *sql.Row) (*domain.RestockBatch, error) {
 }
 
 // UpdateStatus 乐观锁更新回存验收单状态。
+// 仅 PENDING 可流转（ACCEPTED/REJECTED 均为终态），SQL 守卫与状态机保持一致。
 func (r *RestockRepo) UpdateStatus(ctx context.Context, q store.Queryer, id string, status domain.RestockStatus, newBatchID, rejectReason string, expectedVersion int64, now time.Time) error {
 	r2, err := q.ExecContext(ctx, `UPDATE restock_batches SET status=?, new_batch_id=?, reject_reason=?, version=version+1, updated_at=?
-		WHERE id=? AND version=? AND status IN ('PENDING','ACCEPTED')`,
+		WHERE id=? AND version=? AND status='PENDING'`,
 		string(status), newBatchID, rejectReason, clock.Format(now), id, expectedVersion)
 	if err != nil {
 		return err
