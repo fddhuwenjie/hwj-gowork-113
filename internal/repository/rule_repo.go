@@ -75,26 +75,23 @@ func (r *RuleRepo) NextVersionNo(ctx context.Context, q store.Queryer, code stri
 	return int(n.Int64) + 1, nil
 }
 
-// Activate 在事务内启用规则版本：同 code 的其他 ACTIVE 版本全部退役，目标版本置为 ACTIVE。
+// Activate 在事务内启用规则版本：先校验目标版本处于 DRAFT（退役为终态，
+// 不可重新启用），再将同 code 的旧 ACTIVE 版本全部退役，最后置目标版本为 ACTIVE。
+// 任何非法转换都返回 STATE_CONFLICT 并随事务回滚，保证当前生效版本不被破坏。
 func (r *RuleRepo) Activate(ctx context.Context, q store.Queryer, id string, now time.Time) error {
 	rv, err := r.Get(ctx, q, id)
 	if err != nil {
 		return err
 	}
+	if err := domain.MustTransition("rule", string(rv.Status), string(domain.RuleActive)); err != nil {
+		return err
+	}
 	if _, err := q.ExecContext(ctx, `UPDATE rule_versions SET status='RETIRED' WHERE code=? AND status='ACTIVE'`, rv.Code); err != nil {
 		return err
 	}
-	r2, err := q.ExecContext(ctx, `UPDATE rule_versions SET status='ACTIVE', effective_from=? WHERE id=? AND status='DRAFT'`,
-		clock.Format(now), id)
-	if err != nil {
+	if _, err := q.ExecContext(ctx, `UPDATE rule_versions SET status='ACTIVE', effective_from=? WHERE id=? AND status='DRAFT'`,
+		clock.Format(now), id); err != nil {
 		return err
-	}
-	n, err := r2.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return nil
 	}
 	return nil
 }

@@ -81,25 +81,29 @@ func (s *RuleService) CreateRuleVersion(ctx context.Context, actor string, in Cr
 }
 
 // ActivateRule 启用规则版本：同 code 旧版本退役，新版本生效。
+// 启用为终态前置转换：仅 DRAFT 可启用，退役版本再次启用将整体回滚并返回 STATE_CONFLICT，
+// 当前生效版本保持不变。返回值始终反映事务提交后的真实持久化状态，不做内存改写。
 func (s *RuleService) ActivateRule(ctx context.Context, actor, id string) (*domain.RuleVersion, error) {
 	now := s.base.now()
+	var rv *domain.RuleVersion
 	err := s.base.tx.InTx(ctx, func(tx *sql.Tx) error {
 		if err := s.base.repos.Rules.Activate(ctx, tx, id, now); err != nil {
 			return err
 		}
-		return s.base.audit.Log(ctx, tx, actor, "rule.activate", "rule_version", id, nil, now)
+		// 在同一事务内回读提交后的真实状态，保证返回值与持久化一致。
+		current, err := s.base.repos.Rules.Get(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if current.Status != domain.RuleActive {
+			// 理论不可达：转换已校验且 UPDATE 作用于当前 DRAFT 行。
+			return apperr.Newf(500, apperr.CodeInternal, "启用规则 %s 后状态异常: %s", id, current.Status)
+		}
+		rv = current
+		return s.base.audit.Log(ctx, tx, actor, "rule.activate", "rule_version", id, rv, now)
 	})
 	if err != nil {
 		return nil, err
-	}
-	rv, err := s.base.repos.Rules.Get(ctx, s.base.tx.DB(), id)
-	if err != nil {
-		return nil, err
-	}
-	if rv.Status != domain.RuleActive {
-		rv.Status = domain.RuleActive
-		effective := now
-		rv.EffectiveFrom = &effective
 	}
 	return rv, nil
 }

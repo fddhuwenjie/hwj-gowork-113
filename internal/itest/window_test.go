@@ -116,3 +116,55 @@ func TestRuleActivation(t *testing.T) {
 		t.Fatalf("旧版本应退役，实际 %s", v1After.Status)
 	}
 }
+
+// TestRuleActivateTerminalRollback 校验：退役是终态，对已退役版本再次请求启用
+// 必须以 STATE_CONFLICT 失败并整体回滚——不得退役当前生效版本，也不得返回 ACTIVE。
+func TestRuleActivateTerminalRollback(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := e.ctx
+	v1, err := e.svc.Rules.CreateRuleVersion(ctx, "tester", ruleInput("STD-TERM"))
+	if err != nil {
+		t.Fatalf("创建规则失败: %v", err)
+	}
+	if _, err := e.svc.Rules.ActivateRule(ctx, "tester", v1.ID); err != nil {
+		t.Fatalf("启用规则 v1 失败: %v", err)
+	}
+	v2, err := e.svc.Rules.CreateRuleVersion(ctx, "tester", ruleInput("STD-TERM"))
+	if err != nil {
+		t.Fatalf("创建规则 v2 失败: %v", err)
+	}
+	if _, err := e.svc.Rules.ActivateRule(ctx, "tester", v2.ID); err != nil {
+		t.Fatalf("启用规则 v2 失败: %v", err)
+	}
+	// 此时 v1 已退役（终态），v2 生效。再次请求启用 v1 必须失败，不得改写状态。
+	_, err = e.svc.Rules.ActivateRule(ctx, "tester", v1.ID)
+	mustErrCode(t, err, "STATE_CONFLICT")
+
+	// v2 仍必须是唯一生效版本。
+	v2After, _ := e.svc.Rules.GetRule(ctx, v2.ID)
+	if v2After.Status != domain.RuleActive {
+		t.Fatalf("失败重试不得退役当前生效版本，v2 应仍为 ACTIVE，实际 %s", v2After.Status)
+	}
+	if v2After.EffectiveFrom == nil {
+		t.Fatalf("v2 生效时间不应被清除")
+	}
+	// v1 仍是退役终态，未被复活。
+	v1After, _ := e.svc.Rules.GetRule(ctx, v1.ID)
+	if v1After.Status != domain.RuleRetired {
+		t.Fatalf("退役终态不得被重新启用，v1 应仍为 RETIRED，实际 %s", v1After.Status)
+	}
+	// 按编码查询当前生效版本必须仍是 v2。
+	cur, err := e.svc.Rules.ListRules(ctx, "STD-TERM", "", 10)
+	if err != nil {
+		t.Fatalf("查询规则失败: %v", err)
+	}
+	var actives []*domain.RuleVersion
+	for i := range cur.Items {
+		if cur.Items[i].Status == domain.RuleActive {
+			actives = append(actives, &cur.Items[i])
+		}
+	}
+	if len(actives) != 1 || actives[0].ID != v2.ID {
+		t.Fatalf("应仅有 v2 一个生效版本，实际 %d 个", len(actives))
+	}
+}
