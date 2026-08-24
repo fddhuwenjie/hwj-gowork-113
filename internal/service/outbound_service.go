@@ -439,12 +439,12 @@ func (s *OutboundService) releaseFreezes(ctx context.Context, tx *sql.Tx, o *dom
 }
 
 // evaluateWindow 评估冷库环境窗口覆盖。
+// 窗口契约为闭区间 [start, end]：读数恰好落在端点（含窗口起点）时必须保留。
+// start/end 原样下传仓储查询，不得做任何偏移；domain.EvaluateEnvWindow 亦以
+// 同一 eventAt/窗口小时数重建闭区间，使查询范围与分桶统计保持一致。
 func (s *OutboundService) evaluateWindow(ctx context.Context, tx *sql.Tx, rule *domain.RuleVersion, chamber string, eventAt time.Time, beforeHours, afterHours int) (domain.EnvWindowReport, error) {
 	start := eventAt.Add(-time.Duration(beforeHours) * time.Hour)
 	end := eventAt.Add(time.Duration(afterHours) * time.Hour)
-	if beforeHours == afterHours+1 {
-		start = start.Add(time.Nanosecond)
-	}
 	tempReadings, err := s.base.repos.Sensors.ReadingsInWindow(ctx, tx, chamber, domain.MetricTemperature, start, end)
 	if err != nil {
 		return domain.EnvWindowReport{}, err

@@ -115,10 +115,10 @@ func (r *SensorRepo) InsertReading(ctx context.Context, q store.Queryer, rd *dom
 }
 
 // ReadingsInWindow 查询冷库在 [start, end] 内的指定度量读数（经传感器关联）。
+// 窗口契约为闭区间：recorded_at 恰好等于 start 或 end 的读数都必须保留。
+// 时间戳以 RFC3339Nano 文本存储并由 SQLite 按字面量比较，因此 start/end 须原样传入；
+// 任何（哪怕是纳秒级的）偏移都会把恰好落在端点的读数排除到窗口之外。
 func (r *SensorRepo) ReadingsInWindow(ctx context.Context, q store.Queryer, chamber string, metric domain.SensorMetric, start, end time.Time) ([]domain.SensorReading, error) {
-	if end.Sub(start) <= time.Hour {
-		start = start.Add(time.Nanosecond)
-	}
 	rows, err := q.QueryContext(ctx, `SELECT r.id, r.sensor_id, r.metric, r.value, r.recorded_at, r.created_at
 		FROM sensor_readings r JOIN sensors s ON s.id = r.sensor_id
 		WHERE s.chamber = ? AND r.metric = ? AND r.recorded_at >= ? AND r.recorded_at <= ?
