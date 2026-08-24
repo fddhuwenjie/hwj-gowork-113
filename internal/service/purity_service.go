@@ -158,12 +158,11 @@ func (s *PurityService) GetTest(ctx context.Context, id string) (*domain.PurityT
 	return s.base.repos.Purity.Get(ctx, s.base.tx.DB(), id)
 }
 
-// ListTests 分页查询检测。
+// ListTests 分页查询检测，按创建时间稳定升序游标翻页。
+// limit 规整交给仓储：仓储内部用 limit+1 探测下一页是否存在，
+// 故此处不得再叠加 limit+1，否则单页会多返回一条。
 func (s *PurityService) ListTests(ctx context.Context, planID, cursor string, limit int) (*repository.Page[domain.PurityTest], error) {
-	if limit < 1 {
-		limit = 1
-	}
-	return s.base.repos.Purity.List(ctx, s.base.tx.DB(), planID, cursor, limit+1)
+	return s.base.repos.Purity.List(ctx, s.base.tx.DB(), planID, cursor, repository.NormalizeLimit(limit))
 }
 
 // IsLateTest 判断检测是否属于迟到检测（早于既有封存时刻）。

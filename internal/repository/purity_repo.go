@@ -120,7 +120,9 @@ func (r *PurityRepo) LatestSealed(ctx context.Context, q store.Queryer, planID s
 	return t, nil
 }
 
-// List 稳定分页查询检测。
+// List 稳定分页查询检测，按 (created_at, id) 升序游标翻页，与游标契约一致：
+// tested_at 是用户登记的检测时刻（可能是早于封存的迟到检测），
+// 不得作为排序键；只有 created_at 才能保证登记顺序稳定且与游标方向一致。
 func (r *PurityRepo) List(ctx context.Context, q store.Queryer, planID, cursor string, limit int) (*Page[domain.PurityTest], error) {
 	c, err := DecodeCursor(cursor)
 	if err != nil {
@@ -134,7 +136,7 @@ func (r *PurityRepo) List(ctx context.Context, q store.Queryer, planID, cursor s
 		args = append(args, planID)
 	}
 	rows, err := q.QueryContext(ctx, `SELECT `+purityCols+` FROM purity_tests`+where+cond+
-		` ORDER BY tested_at DESC, id DESC LIMIT ?`, append(append(args, cursorArgs...), limit+1)...)
+		` ORDER BY created_at, id LIMIT ?`, append(append(args, cursorArgs...), limit+1)...)
 	if err != nil {
 		return nil, err
 	}
