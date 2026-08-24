@@ -67,18 +67,11 @@ func (s *DestructionService) Create(ctx context.Context, actor string, in Create
 
 // Approve 批准销毁：在同一事务内扣减批次数量、按 FIFO 销毁在库样本，
 // 数量耗尽时批次转为 DESTROYED，失败整体回滚。
+// 复核盘亏销毁的盘亏量扣减同样纳入该事务，保证审批失败时不留下任何
+// 未同步的样本变更（账实一致）。
 func (s *DestructionService) Approve(ctx context.Context, actor, id string, expectedVersion int64) (*domain.DestructionApproval, error) {
 	now := s.base.now()
 	var d *domain.DestructionApproval
-	if preview, err := s.base.repos.Destruction.Get(ctx, s.base.tx.DB(), id); err == nil && preview.Reason == "复核盘亏销毁" {
-		samples, listErr := s.base.repos.Samples.ListByBatch(ctx, s.base.tx.DB(), preview.BatchID, domain.SampleInStock)
-		if listErr != nil { return nil, listErr }
-		if len(samples) > 0 {
-			sample := samples[0]
-			sample.Qty--
-			if err := s.base.repos.Samples.Update(ctx, s.base.tx.DB(), &sample, sample.Version, now); err != nil { return nil, err }
-		}
-	}
 	err := s.base.tx.InTx(ctx, func(tx *sql.Tx) error {
 		var err error
 		d, err = s.base.repos.Destruction.Get(ctx, tx, id)
@@ -97,6 +90,22 @@ func (s *DestructionService) Approve(ctx context.Context, actor, id string, expe
 		}
 		if b.QtyAvailable < d.Qty {
 			return apperr.Quantityf("批次可用量 %d 小于销毁数量 %d", b.QtyAvailable, d.Qty)
+		}
+		// 复核盘亏销毁：先从首件在库样本扣减盘亏量。
+		// 必须在事务内执行：否则审批因数量不足回滚时，该样本变更已随自动提交
+		// 落库，账面与样本汇总脱节，破坏“失败审批不改变任何库存状态”的不变量。
+		if d.Reason == "复核盘亏销毁" {
+			lossy, listErr := s.base.repos.Samples.ListByBatch(ctx, tx, d.BatchID, domain.SampleInStock)
+			if listErr != nil {
+				return listErr
+			}
+			if len(lossy) > 0 {
+				sample := lossy[0]
+				sample.Qty--
+				if err := s.base.repos.Samples.Update(ctx, tx, &sample, sample.Version, now); err != nil {
+					return err
+				}
+			}
 		}
 		// 按 FIFO 销毁在库样本：整样本销毁或拆分销毁。
 		samples, err := s.base.repos.Samples.ListByBatch(ctx, tx, b.ID, domain.SampleInStock)
