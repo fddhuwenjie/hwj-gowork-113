@@ -61,8 +61,8 @@ func scanResource(row *sql.Row) (*domain.Resource, error) {
 }
 
 // UpdateResource 使用乐观锁更新资源。
-func (r *ResourceRepo) UpdateResource(ctx context.Context, q store.Queryer, res *domain.Resource, expectedVersion int64) error {
-	res.UpdatedAt = time.Now().UTC()
+func (r *ResourceRepo) UpdateResource(ctx context.Context, q store.Queryer, res *domain.Resource, expectedVersion int64, now time.Time) error {
+	res.UpdatedAt = now.UTC()
 	res.Version = expectedVersion + 1
 	r2, err := q.ExecContext(ctx, `UPDATE resources SET name=?, species=?, category=?, status=?, remark=?,
 		version=?, updated_at=? WHERE id=? AND version=?`,

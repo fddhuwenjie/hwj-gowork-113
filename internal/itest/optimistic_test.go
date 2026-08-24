@@ -53,3 +53,33 @@ func TestOptimisticLockOnSample(t *testing.T) {
 	_, err = e.svc.Storage.AssignLocation(ctx, "tester", smp.ID, loc.ID, smp.Version+9)
 	mustErrCode(t, err, "OPTIMISTIC_LOCK")
 }
+
+// TestArchiveResourceUsesInjectedClock ensures resource state and audit work
+// from the same deterministic business timestamp.
+func TestArchiveResourceUsesInjectedClock(t *testing.T) {
+	e := newTestEnv(t)
+	created, err := e.svc.Resources.CreateResource(e.ctx, "tester", service.CreateResourceInput{
+		Code: "RES-CLOCK", Name: "时钟校验", Species: "Oryza sativa",
+	})
+	if err != nil {
+		t.Fatalf("创建资源失败: %v", err)
+	}
+
+	e.clk.Advance(6 * time.Hour)
+	want := e.clk.Now()
+	archived, err := e.svc.Resources.ArchiveResource(e.ctx, "tester", created.ID, created.Version)
+	if err != nil {
+		t.Fatalf("归档资源失败: %v", err)
+	}
+	if !archived.UpdatedAt.Equal(want) {
+		t.Fatalf("归档时间必须来自注入时钟: got %s want %s", archived.UpdatedAt, want)
+	}
+
+	stored, err := e.svc.Resources.GetResource(e.ctx, created.ID)
+	if err != nil {
+		t.Fatalf("读取归档资源失败: %v", err)
+	}
+	if !stored.UpdatedAt.Equal(want) {
+		t.Fatalf("持久化归档时间必须来自注入时钟: got %s want %s", stored.UpdatedAt, want)
+	}
+}

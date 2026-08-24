@@ -81,6 +81,7 @@ func (s *ResourceService) ListResources(ctx context.Context, cursor string, limi
 // ArchiveResource 归档资源（乐观锁）。
 func (s *ResourceService) ArchiveResource(ctx context.Context, actor, id string, expectedVersion int64) (*domain.Resource, error) {
 	var res *domain.Resource
+	now := s.base.now()
 	err := s.base.tx.InTx(ctx, func(tx *sql.Tx) error {
 		var err error
 		res, err = s.base.repos.Resources.GetResourceForUpdate(ctx, tx, id)
@@ -91,10 +92,10 @@ func (s *ResourceService) ArchiveResource(ctx context.Context, actor, id string,
 			return apperr.OptimisticLock("资源", id)
 		}
 		res.Status = domain.ResourceArchived
-		if err := s.base.repos.Resources.UpdateResource(ctx, tx, res, expectedVersion); err != nil {
+		if err := s.base.repos.Resources.UpdateResource(ctx, tx, res, expectedVersion, now); err != nil {
 			return err
 		}
-		return s.base.audit.Log(ctx, tx, actor, "resource.archive", "resource", id, res, s.base.now())
+		return s.base.audit.Log(ctx, tx, actor, "resource.archive", "resource", id, res, now)
 	})
 	if err != nil {
 		return nil, err
