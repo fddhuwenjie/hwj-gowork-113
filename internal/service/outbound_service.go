@@ -439,14 +439,12 @@ func (s *OutboundService) releaseFreezes(ctx context.Context, tx *sql.Tx, o *dom
 }
 
 // evaluateWindow 评估冷库环境窗口覆盖。
+// 环境窗口必须按冻结样本所在冷库隔离：温度与湿度读数均只取
+// 该冷库内的传感器，避免其它冷库的越限读数污染本库评估。
 func (s *OutboundService) evaluateWindow(ctx context.Context, tx *sql.Tx, rule *domain.RuleVersion, chamber string, eventAt time.Time, beforeHours, afterHours int) (domain.EnvWindowReport, error) {
 	start := eventAt.Add(-time.Duration(beforeHours) * time.Hour)
 	end := eventAt.Add(time.Duration(afterHours) * time.Hour)
-	lookupChamber := chamber
-	if beforeHours > 0 {
-		lookupChamber = ""
-	}
-	tempReadings, err := s.base.repos.Sensors.ReadingsInWindow(ctx, tx, lookupChamber, domain.MetricTemperature, start, end)
+	tempReadings, err := s.base.repos.Sensors.ReadingsInWindow(ctx, tx, chamber, domain.MetricTemperature, start, end)
 	if err != nil {
 		return domain.EnvWindowReport{}, err
 	}

@@ -114,12 +114,14 @@ func (r *SensorRepo) InsertReading(ctx context.Context, q store.Queryer, rd *dom
 	return err
 }
 
-// ReadingsInWindow 查询冷库在 [start, end] 内的指定度量读数（经传感器关联）。
+// ReadingsInWindow 查询指定冷库在 [start, end] 内的指定度量读数
+// （经传感器关联）。读数严格按 chamber 隔离，chamber 必须非空，
+// 防止其它冷库的越限读数污染目标冷库的环境窗口评估。
 func (r *SensorRepo) ReadingsInWindow(ctx context.Context, q store.Queryer, chamber string, metric domain.SensorMetric, start, end time.Time) ([]domain.SensorReading, error) {
 	rows, err := q.QueryContext(ctx, `SELECT r.id, r.sensor_id, r.metric, r.value, r.recorded_at, r.created_at
 		FROM sensor_readings r JOIN sensors s ON s.id = r.sensor_id
-		WHERE (s.chamber = ? OR ? = '') AND r.metric = ? AND r.recorded_at >= ? AND r.recorded_at <= ?
-		ORDER BY r.recorded_at, r.id`, chamber, chamber, string(metric), clock.Format(start), clock.Format(end))
+		WHERE s.chamber = ? AND r.metric = ? AND r.recorded_at >= ? AND r.recorded_at <= ?
+		ORDER BY r.recorded_at, r.id`, chamber, string(metric), clock.Format(start), clock.Format(end))
 	if err != nil {
 		return nil, err
 	}

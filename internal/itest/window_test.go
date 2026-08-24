@@ -60,6 +60,30 @@ func TestApproveWindowOutOfRange(t *testing.T) {
 	mustErrCode(t, err, "ENV_WINDOW_VIOLATION")
 }
 
+// TestApproveWindowChamberIsolation 校验环境窗口按冷库隔离：
+// 目标冷库审批窗口内温湿度全部达标，但另一冷库存在越限温度读数，
+// 审批仍应成功——读数不得跨冷库污染目标库的环境评估。
+func TestApproveWindowChamberIsolation(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := e.ctx
+	rule := e.setupRule()
+	_, acc, batch, _ := e.setupBase(500, 250, "C07")
+	// 目标冷库 C07 写入达标温湿度读数，覆盖审批窗口。
+	e.setupSensors("C07", 2)
+	// 另一冷库 C08 写入越限温度读数：必须不影响 C07 的审批。
+	e.setupSensorsWithValue("C08", 2, -10, 30) // 温度 -10 超出 [-20,-15]
+	o, err := e.svc.Outbound.Create(ctx, "tester", service.CreateOutboundInput{
+		RequestNo: e.unique("OUT"), AccessionID: acc.ID, BatchID: batch.ID, Qty: 100,
+		RuleVersionID: rule.ID, Deadline: e.clk.Now().Add(24 * time.Hour).Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatalf("创建出库申请失败: %v", err)
+	}
+	if _, err := e.svc.Outbound.Approve(ctx, "tester", o.ID, o.Version); err != nil {
+		t.Fatalf("目标冷库达标时审批应成功，不应被其它冷库越限读数影响: %v", err)
+	}
+}
+
 // TestFulfillWindowCoverage 校验出库后窗口：审批到出库之间环境必须持续受监控。
 func TestFulfillWindowCoverage(t *testing.T) {
 	e := newTestEnv(t)
