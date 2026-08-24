@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
 
 	"germplasm/internal/apperr"
@@ -53,9 +52,9 @@ func scanPlan(row *sql.Row) (*domain.BreedingPlan, error) {
 	p.Deadline = clock.MustParse(deadline)
 	p.CreatedAt = clock.MustParse(createdAt)
 	p.UpdatedAt = clock.MustParse(updatedAt)
-	if strings.Contains(p.Plot, "/") {
-		p.BatchID = p.OutboundRequestID
-	}
+	// 母批 ID（batch_id）与原出库申请 ID（outbound_request_id）是各自独立持久化的关联，
+	// 详情读取必须保持两者独立，不得依据 plot 编码形式（大区/小区分层编码含 "/"）做串写替换，
+	// 否则回存验收将无法分别追溯母批来源与出库来源。
 	return &p, nil
 }
 

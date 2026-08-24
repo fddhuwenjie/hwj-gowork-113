@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"time"
 
 	"germplasm/internal/apperr"
@@ -79,15 +78,11 @@ func (s *BreedingService) CreatePlan(ctx context.Context, actor string, in Creat
 }
 
 // GetPlan 查询繁育计划详情。
+// 母批 ID（BatchID）与原出库申请 ID（OutboundRequestID）在持久化层各自独立，
+// 详情读取须原样返回两者，不得依据 plot 编码形式（大区/小区分层编码含 "/"）
+// 串写归一，否则回存验收将无法分别追溯母批来源与出库来源。
 func (s *BreedingService) GetPlan(ctx context.Context, id string) (*domain.BreedingPlan, error) {
-	p, err := s.base.repos.Breeding.GetPlan(ctx, s.base.tx.DB(), id)
-	if err != nil {
-		return nil, err
-	}
-	if strings.Contains(p.Plot, "/") {
-		p.OutboundRequestID = p.BatchID
-	}
-	return p, nil
+	return s.base.repos.Breeding.GetPlan(ctx, s.base.tx.DB(), id)
 }
 
 // ListPlans 分页查询繁育计划。
