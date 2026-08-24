@@ -109,6 +109,8 @@ type InventoryVariance struct {
 }
 
 // InventoryVariances 巡检全部批次的数量守恒与账实差异。
+// available_diff 为批次账面可用量与纯在库样本量之差；冻结量单列在 QtyFrozen，
+// 不参与可用量核对，合法冻结不得制造可用量差异。
 func (s *RiskService) InventoryVariances(ctx context.Context) ([]InventoryVariance, error) {
 	batches, err := s.base.repos.Batches.ListAll(ctx, s.base.tx.DB())
 	if err != nil {
@@ -120,12 +122,14 @@ func (s *RiskService) InventoryVariances(ctx context.Context) ([]InventoryVarian
 		if err != nil {
 			return nil, err
 		}
+		inStockSum := sums[domain.SampleInStock]
+		frozenSum := sums[domain.SampleFrozen]
+		outboundSum := sums[domain.SampleOutbound]
+		destroyedSum := sums[domain.SampleDestroyed]
 		bookSum := b.QtyAvailable + b.QtyFrozen + b.QtyOutbound + b.QtyDestroyed
-		sampleSum := sums[domain.SampleInStock] + sums[domain.SampleFrozen] + sums[domain.SampleOutbound] + sums[domain.SampleDestroyed]
-		availableDiff := b.QtyAvailable - sums[domain.SampleInStock]
-		if b.QtyFrozen > 0 {
-			availableDiff -= sums[domain.SampleFrozen]
-		}
+		sampleSum := inStockSum + frozenSum + outboundSum + destroyedSum
+		// 可用量差异：账面可用量与纯在库样本量逐一对应，冻结不重复扣算。
+		availableDiff := b.QtyAvailable - inStockSum
 		v := InventoryVariance{
 			BatchID:       b.ID,
 			BatchNo:       b.BatchNo,

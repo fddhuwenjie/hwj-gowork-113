@@ -115,7 +115,7 @@ func (r *SampleRepo) List(ctx context.Context, q store.Queryer, batchID, status,
 	}
 	if status != "" {
 		where += " AND status = ?"
-		args = append(args, status)
+		args = append(args, string(status))
 	}
 	rows, err := q.QueryContext(ctx, `SELECT `+sampleCols+` FROM samples`+where+cond+
 		` ORDER BY created_at, id LIMIT ?`, append(append(args, cursorArgs...), limit+1)...)
@@ -140,6 +140,8 @@ func (r *SampleRepo) List(ctx context.Context, q store.Queryer, batchID, status,
 }
 
 // SumByBatchAndStatus 汇总批次在库/冻结/出库/销毁样本数量，用于守恒巡检。
+// 各状态与批次数量桶一一对应，不折叠：sums[IN_STOCK] 为纯在库量，冻结量单独落在
+// sums[FROZEN]。可用量差异巡检以此为账实核对，冻结单列在 QtyFrozen，不得重复扣算。
 func (r *SampleRepo) SumByBatchAndStatus(ctx context.Context, q store.Queryer, batchID string) (map[domain.SampleStatus]int64, error) {
 	rows, err := q.QueryContext(ctx, `SELECT status, COALESCE(SUM(qty),0) FROM samples WHERE batch_id = ? GROUP BY status`, batchID)
 	if err != nil {
@@ -153,11 +155,7 @@ func (r *SampleRepo) SumByBatchAndStatus(ctx context.Context, q store.Queryer, b
 		if err := rows.Scan(&st, &sum); err != nil {
 			return nil, err
 		}
-		status := domain.SampleStatus(st)
-		out[status] = sum
-		if status == domain.SampleFrozen {
-			out[domain.SampleInStock] += sum
-		}
+		out[domain.SampleStatus(st)] = sum
 	}
 	return out, rows.Err()
 }
