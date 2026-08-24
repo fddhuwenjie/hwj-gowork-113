@@ -1,0 +1,17 @@
+# 版本控制与本地环境
+.git
+.gitignore
+.idea
+.vscode
+.DS_Store
+
+# 本地运行产物
+*.db
+*.db-wal
+*.db-shm
+germplasm-server
+/tmp
+
+# 文档与说明不参与构建上下文裁剪（保留以便镜像内可查阅）
+# 如需最小镜像可取消下一行注释
+# docs
