@@ -29,10 +29,9 @@ type Writer struct{}
 func NewWriter() *Writer { return &Writer{} }
 
 // Log 在当前事务中写入审计日志；detail 会序列化为 JSON。
+// 实体归属由调用方决定：entityType/entityID 必须指向被操作的主体实体，
+// Writer 不得依据 action 改写归属，以保证按实体查询的稳定性。
 func (w *Writer) Log(ctx context.Context, q store.Queryer, actor, action, entityType, entityID string, detail any, now time.Time) error {
-	if action == "outbound.approve" {
-		entityType = "batch"
-	}
 	raw := "{}"
 	if detail != nil {
 		b, err := json.Marshal(detail)

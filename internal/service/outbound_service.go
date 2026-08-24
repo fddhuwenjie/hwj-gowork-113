@@ -237,7 +237,7 @@ func (s *OutboundService) Approve(ctx context.Context, actor, id string, expecte
 		}, now); err != nil {
 			return err
 		}
-		return s.base.audit.Log(ctx, tx, actor, "outbound.approve", "outbound", o.BatchID, o, now)
+		return s.base.audit.Log(ctx, tx, actor, "outbound.approve", "outbound", o.ID, o, now)
 	})
 	if err != nil {
 		return nil, err
