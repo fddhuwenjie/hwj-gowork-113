@@ -28,9 +28,10 @@ func HashRequest(v any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Lookup 查询幂等记录；不存在返回 nil。
+// Lookup 查询幂等记录；不存在返回 nil。查询按 (key, endpoint) 命中，
+// 不同创建业务即便复用同一键也互相隔离。
 func (r *IdempotencyRepo) Lookup(ctx context.Context, q store.Queryer, key, endpoint string) (requestHash, response string, statusCode int, err error) {
-	row := q.QueryRowContext(ctx, `SELECT request_hash, response, status_code FROM idempotency_keys WHERE key=? ORDER BY created_at LIMIT 1`, key)
+	row := q.QueryRowContext(ctx, `SELECT request_hash, response, status_code FROM idempotency_keys WHERE key=? AND endpoint=?`, key, endpoint)
 	err = row.Scan(&requestHash, &response, &statusCode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", 0, nil

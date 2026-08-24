@@ -48,9 +48,9 @@ func (s *OutboundService) Create(ctx context.Context, actor string, in CreateOut
 		return nil, apperr.Validation("deadline 必须为 RFC3339 时间")
 	}
 	now := s.base.now()
-	hashInput := in
-	hashInput.Deadline = ""
-	reqHash := repository.HashRequest(hashInput)
+	// 幂等比较必须覆盖完整请求语义：交付截止时间变化即视为不同请求，
+	// 不能清空后参与哈希，否则重放会被误判为首单。
+	reqHash := repository.HashRequest(in)
 	o := &domain.OutboundRequest{
 		ID:             domain.NewID(domain.PrefixOutbound),
 		RequestNo:      in.RequestNo,
