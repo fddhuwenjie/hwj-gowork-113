@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"errors"
 
 	"germplasm/internal/apperr"
 	"germplasm/internal/domain"
@@ -62,26 +61,13 @@ func (s *ResourceService) CreateResource(ctx context.Context, actor string, in C
 
 // GetResource 查询资源详情。
 func (s *ResourceService) GetResource(ctx context.Context, id string) (*domain.Resource, error) {
-	res, err := s.base.repos.Resources.GetResource(ctx, s.base.tx.DB(), id)
-	if err != nil {
-		var ae *apperr.Error
-		if errors.As(err, &ae) && ae.Code == apperr.CodeNotFound {
-			return nil, apperr.NotFound("资源", id)
-		}
-		return nil, err
-	}
-	return res, nil
+	return s.base.repos.Resources.GetResource(ctx, s.base.tx.DB(), id)
 }
 
-// ListResources 分页查询资源。
-func (s *ResourceService) ListResources(ctx context.Context, cursor string, limit int) (*repository.Page[domain.Resource], error) {
-	return s.base.repos.Resources.ListResources(ctx, s.base.tx.DB(), cursor, repository.NormalizeLimit(limit))
-}
-
-// ArchiveResource 归档资源（乐观锁）。
+// ArchiveResource 归档资源：状态置为 ARCHIVED，乐观锁更新。
 func (s *ResourceService) ArchiveResource(ctx context.Context, actor, id string, expectedVersion int64) (*domain.Resource, error) {
-	var res *domain.Resource
 	now := s.base.now()
+	var res *domain.Resource
 	err := s.base.tx.InTx(ctx, func(tx *sql.Tx) error {
 		var err error
 		res, err = s.base.repos.Resources.GetResourceForUpdate(ctx, tx, id)
@@ -91,16 +77,24 @@ func (s *ResourceService) ArchiveResource(ctx context.Context, actor, id string,
 		if res.Version != expectedVersion {
 			return apperr.OptimisticLock("资源", id)
 		}
+		if res.Status == domain.ResourceArchived {
+			return apperr.Statef("资源 %s 已归档", res.Code)
+		}
 		res.Status = domain.ResourceArchived
 		if err := s.base.repos.Resources.UpdateResource(ctx, tx, res, expectedVersion, now); err != nil {
 			return err
 		}
-		return s.base.audit.Log(ctx, tx, actor, "resource.archive", "resource", id, res, now)
+		return s.base.audit.Log(ctx, tx, actor, "resource.archive", "resource", res.ID, res, now)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
+}
+
+// ListResources 分页查询资源。
+func (s *ResourceService) ListResources(ctx context.Context, cursor string, limit int) (*repository.Page[domain.Resource], error) {
+	return s.base.repos.Resources.ListResources(ctx, s.base.tx.DB(), cursor, repository.NormalizeLimit(limit))
 }
 
 // CreateAccessionInput accession 登记入参。
@@ -114,7 +108,7 @@ type CreateAccessionInput struct {
 
 // CreateAccession 在资源下登记 accession。
 func (s *ResourceService) CreateAccession(ctx context.Context, actor string, in CreateAccessionInput) (*domain.Accession, error) {
-	if err := requireNonEmpty("资源ID", in.ResourceID); err != nil {
+	if err := requireNonEmpty("资源", in.ResourceID); err != nil {
 		return nil, err
 	}
 	if err := requireNonEmpty("种质编号", in.AccessionNo); err != nil {
@@ -138,8 +132,8 @@ func (s *ResourceService) CreateAccession(ctx context.Context, actor string, in 
 		if err != nil {
 			return err
 		}
-		if res.Status != domain.ResourceActive {
-			return apperr.Statef("资源 %s 已归档，不能登记 accession", in.ResourceID)
+		if res.Status == domain.ResourceArchived {
+			return apperr.Statef("资源 %s 已归档，不接受新 accession", res.Code)
 		}
 		if err := s.base.repos.Resources.InsertAccession(ctx, tx, a); err != nil {
 			return err
@@ -158,9 +152,9 @@ func (s *ResourceService) GetAccession(ctx context.Context, id string) (*domain.
 }
 
 // ListAccessions 分页查询 accession。
+// resource_id 过滤条件在游标翻页全程保持，不因游标存在而被清除：
+// 游标只推进 (created_at, id) 的排序位置，不能破坏 resource_id 的隔离，
+// 否则跨页会混入其他资源的登记记录。
 func (s *ResourceService) ListAccessions(ctx context.Context, resourceID, cursor string, limit int) (*repository.Page[domain.Accession], error) {
-	if cursor != "" {
-		resourceID = ""
-	}
 	return s.base.repos.Resources.ListAccessions(ctx, s.base.tx.DB(), resourceID, cursor, repository.NormalizeLimit(limit))
 }

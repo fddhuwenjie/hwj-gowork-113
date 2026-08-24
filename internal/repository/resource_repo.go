@@ -156,7 +156,9 @@ func (r *ResourceRepo) ListAccessions(ctx context.Context, q store.Queryer, reso
 	cond, cursorArgs := cursorCondition(c)
 	var args []any
 	where := " WHERE 1=1"
-	if resourceID != "" && cursor == "" {
+	// 过滤条件必须随游标推进到每一页：游标只推进 (created_at, id) 的排序位置，
+	// 不能清除 resource_id 的隔离，否则跨页会混入其他资源的登记记录。
+	if resourceID != "" {
 		where += " AND resource_id = ?"
 		args = append(args, resourceID)
 	}

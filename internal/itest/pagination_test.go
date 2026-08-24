@@ -85,3 +85,64 @@ func TestBatchPaginationFilter(t *testing.T) {
 		t.Fatalf("第二页应为 2 条且无下页游标")
 	}
 }
+
+// TestAccessionFilterPagination 跨页筛选隔离：按 resource_id 筛选 accession 并翻页时，
+// 每一页都必须只含目标资源下的登记记录，游标不得清除 resource_id 隔离，
+// 且翻页结果不重不漏。
+func TestAccessionFilterPagination(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := e.ctx
+
+	// 资源 A：25 条 accession（跨多页，limit 取 10 → 3 页）
+	resA, _ := e.svc.Resources.CreateResource(ctx, "tester", service.CreateResourceInput{
+		Code: e.unique("RES"), Name: "资源A", Species: "S", Category: "C",
+	})
+	// 资源 B：30 条 accession，穿插在 A 之后创建，时间排序上与 A 混排。
+	resB, _ := e.svc.Resources.CreateResource(ctx, "tester", service.CreateResourceInput{
+		Code: e.unique("RES"), Name: "资源B", Species: "S", Category: "C",
+	})
+	for i := 0; i < 25; i++ {
+		if _, err := e.svc.Resources.CreateAccession(ctx, "tester", service.CreateAccessionInput{
+			ResourceID: resA.ID, AccessionNo: e.unique("ACC"),
+		}); err != nil {
+			t.Fatalf("创建资源A的accession失败: %v", err)
+		}
+		// 资源B的accession交错插入，确保时间排序上与A交错，放大跨页漏筛风险。
+		if _, err := e.svc.Resources.CreateAccession(ctx, "tester", service.CreateAccessionInput{
+			ResourceID: resB.ID, AccessionNo: e.unique("ACC"),
+		}); err != nil {
+			t.Fatalf("创建资源B的accession失败: %v", err)
+		}
+	}
+
+	const limit = 10
+	seen := map[string]bool{}
+	cursor := ""
+	pages := 0
+	for {
+		page, err := e.svc.Resources.ListAccessions(ctx, resA.ID, cursor, limit)
+		if err != nil {
+			t.Fatalf("分页查询失败: %v", err)
+		}
+		for _, item := range page.Items {
+			if item.ResourceID != resA.ID {
+				t.Fatalf("跨页筛选泄漏：资源A筛选页混入资源 %s 的登记记录", item.ResourceID)
+			}
+			if seen[item.ID] {
+				t.Fatalf("分页结果重复: %s", item.ID)
+			}
+			seen[item.ID] = true
+		}
+		pages++
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		if pages > 10 {
+			t.Fatalf("分页未收敛")
+		}
+	}
+	if len(seen) != 25 {
+		t.Fatalf("资源A应覆盖全部 25 条 accession，实际 %d", len(seen))
+	}
+}
