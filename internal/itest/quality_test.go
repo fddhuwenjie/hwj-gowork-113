@@ -116,6 +116,64 @@ func TestRestockBlockedWithoutSealedTest(t *testing.T) {
 	mustErrCode(t, err, "QUALITY_VIOLATION")
 }
 
+// TestRestockBlockedByTimeout 繁育计划被超时作业标记为 TIMEOUT 后，
+// 超时终态应拒绝新的回存链路：不得创建回存单（拒绝进入待验收），更不得
+// 借验收把计划推进为 COMPLETED。回存编排与计划状态机之间不允许越权转换。
+func TestRestockBlockedByTimeout(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := e.ctx
+	plan := e.breedToTest(t, "C20")
+	// 提前登记并封存合格结论，确保后续回存失败仅由 TIMEOUT 状态导致，
+	// 而非缺少封存结论或质量门槛不达标。
+	test, err := e.svc.Purity.CreateTest(ctx, "tester", service.CreateTestInput{
+		PlanID: plan.ID, SampleQty: 300, CoverageRatio: 1.0, PurityRate: 0.98,
+	})
+	if err != nil {
+		t.Fatalf("登记检测失败: %v", err)
+	}
+	if _, err := e.svc.Purity.SealTest(ctx, "tester", test.ID, test.Version); err != nil {
+		t.Fatalf("封存失败: %v", err)
+	}
+	// 在计划仍为 ACTIVE 时创建回存单（进入待验收），随后让超时巡检将其置为 TIMEOUT，
+	// 模拟“超时前已存在待验收回存单”这一越权场景的入口。
+	rb, err := e.svc.Restock.Create(ctx, "tester", service.CreateRestockInput{
+		RequestNo: e.unique("RST"), PlanID: plan.ID, Qty: 800,
+	})
+	if err != nil {
+		t.Fatalf("超时前创建回存单不应失败: %v", err)
+	}
+	// 推进时间超过繁育期限，超时巡检将 ACTIVE 计划标记为 TIMEOUT。
+	e.clk.Advance(31 * 24 * time.Hour)
+	e.sched.RunOnceForTest(ctx)
+	p, err := e.svc.Breeding.GetPlan(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("查询计划失败: %v", err)
+	}
+	if p.Status != domain.PlanTimeout {
+		t.Fatalf("超期计划应标记 TIMEOUT，实际 %s", p.Status)
+	}
+	// 越权链路 1：超时后不得验收既有回存单，也不得把计划推进为 COMPLETED。
+	_, err = e.svc.Restock.Accept(ctx, "tester", rb.ID, rb.Version)
+	mustErrCode(t, err, "STATE_CONFLICT")
+	finalPlan, _ := e.svc.Breeding.GetPlan(ctx, plan.ID)
+	if finalPlan.Status != domain.PlanTimeout {
+		t.Fatalf("超时计划不得被验收推进为 COMPLETED，实际 %s", finalPlan.Status)
+	}
+	batches, _ := e.svc.Storage.ListBatches(ctx, "", string(domain.BatchRestock), "", 50)
+	if len(batches.Items) != 0 {
+		t.Fatalf("超时计划验收失败不得创建回存批次，实际 %d 个", len(batches.Items))
+	}
+	// 越权链路 2：超时后不得新建回存验收单（拒绝进入待验收）。
+	_, err = e.svc.Restock.Create(ctx, "tester", service.CreateRestockInput{
+		RequestNo: e.unique("RST"), PlanID: plan.ID, Qty: 800,
+	})
+	mustErrCode(t, err, "STATE_CONFLICT")
+	page, _ := e.svc.Restock.List(ctx, "", "", 50)
+	if len(page.Items) != 1 { // 仅含超时前创建的那一张
+		t.Fatalf("超时计划不得新增回存单，期望 1 张，实际 %d 张", len(page.Items))
+	}
+}
+
 // TestLateTestCannotOverride 迟到检测不得覆盖当前质量结论：
 // 已封存后，早于封存时刻的检测只能只读登记，封存第二次一律拒绝。
 func TestLateTestCannotOverride(t *testing.T) {

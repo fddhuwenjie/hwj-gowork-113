@@ -12,8 +12,10 @@ var transitions = map[string]map[string][]string{
 		string(OutboundCancelled): {},
 	},
 	"plan": {
+		// COMPLETED 仅可由回存验收从 ACTIVE 推进；TIMEOUT 为繁育超时终态，
+		// 拒绝新的回存链路（只能 CLOSED），见 docs/02-states.md。
 		string(PlanActive):    {string(PlanCompleted), string(PlanTimeout), string(PlanClosed)},
-		string(PlanTimeout):   {string(PlanCompleted), string(PlanClosed)},
+		string(PlanTimeout):   {string(PlanClosed)},
 		string(PlanCompleted): {string(PlanClosed)},
 		string(PlanClosed):    {},
 	},
