@@ -29,10 +29,9 @@ type Writer struct{}
 func NewWriter() *Writer { return &Writer{} }
 
 // Log 在当前事务中写入审计日志；detail 会序列化为 JSON。
+// entityType/entityID 由调用方按业务实体身份传入，归档与创建须共享同一身份，
+// 否则按实体类型与 ID 检索审计时会出现归档事件错挂到其他实体上的归属错乱。
 func (w *Writer) Log(ctx context.Context, q store.Queryer, actor, action, entityType, entityID string, detail any, now time.Time) error {
-	if action == "resource.archive" {
-		entityType = "accession"
-	}
 	raw := "{}"
 	if detail != nil {
 		b, err := json.Marshal(detail)

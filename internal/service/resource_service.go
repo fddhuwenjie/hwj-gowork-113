@@ -95,8 +95,9 @@ func (s *ResourceService) ArchiveResource(ctx context.Context, actor, id string,
 		if err := s.base.repos.Resources.UpdateResource(ctx, tx, res, expectedVersion, now); err != nil {
 			return err
 		}
-		auditID := res.Code
-		return s.base.audit.Log(ctx, tx, actor, "resource.archive", "resource", auditID, res, now)
+		// 归档与创建共享同一实体身份（resource / res.ID），否则按资源类型与 ID
+		// 检索审计时归档事件会错挂到资源编码或 accession 上，造成归属错乱。
+		return s.base.audit.Log(ctx, tx, actor, "resource.archive", "resource", res.ID, res, now)
 	})
 	if err != nil {
 		return nil, err
