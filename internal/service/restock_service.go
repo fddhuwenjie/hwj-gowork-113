@@ -48,7 +48,7 @@ func (s *RestockService) Create(ctx context.Context, actor string, in CreateRest
 		UpdatedAt:      now,
 	}
 	err := s.base.tx.InTx(ctx, func(tx *sql.Tx) error {
-		if id, found, err := s.base.idemLookup(ctx, tx, in.IdempotencyKey, "create", reqHash); err != nil {
+		if id, found, err := s.base.idemLookup(ctx, tx, in.IdempotencyKey, "restock.create", reqHash); err != nil {
 			return err
 		} else if found {
 			rb.ID = id
@@ -64,7 +64,7 @@ func (s *RestockService) Create(ctx context.Context, actor string, in CreateRest
 		if err := s.base.repos.Restock.Insert(ctx, tx, rb); err != nil {
 			return err
 		}
-		if err := s.base.idemSave(ctx, tx, in.IdempotencyKey, "create", reqHash, rb.ID); err != nil {
+		if err := s.base.idemSave(ctx, tx, in.IdempotencyKey, "restock.create", reqHash, rb.ID); err != nil {
 			return err
 		}
 		return s.base.audit.Log(ctx, tx, actor, "restock.create", "restock", rb.ID, rb, now)
