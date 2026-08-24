@@ -90,6 +90,43 @@ func TestFulfillWindowCoverage(t *testing.T) {
 	}
 }
 
+// TestApproveWindowChamberScopedToDashName 校验环境窗口严格绑定样本所在冷库：
+// 即便目标冷库名含连字符、自身无任何读数，而另一冷库有完整达标数据，
+// 审批也必须因目标冷库覆盖不足而失败——不得跨冷库聚合读数。
+func TestApproveWindowChamberScopedToDashName(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := e.ctx
+	rule := e.setupRule()
+	// 目标冷库名含连字符（曾触发错误的范围丢弃逻辑）。
+	_, acc, batch, _ := e.setupBase(500, 250, "C-04")
+	// 另一冷库 C00 写入完整达标读数；目标冷库 C-04 不写入任何读数。
+	e.setupSensors("C00", 2)
+	o, err := e.svc.Outbound.Create(ctx, "tester", service.CreateOutboundInput{
+		RequestNo: e.unique("OUT"), AccessionID: acc.ID, BatchID: batch.ID, Qty: 100,
+		RuleVersionID: rule.ID, Deadline: e.clk.Now().Add(24 * time.Hour).Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatalf("创建出库申请失败: %v", err)
+	}
+	_, err = e.svc.Outbound.Approve(ctx, "tester", o.ID, o.Version)
+	mustErrCode(t, err, "ENV_WINDOW_VIOLATION")
+	// 事务回滚：申请仍为 PENDING，批次数量未冻结。
+	oAfter, _ := e.svc.Outbound.Get(ctx, o.ID)
+	if oAfter.Status != domain.OutboundPending {
+		t.Fatalf("目标冷库无读数时审批应失败且回滚，申请状态实际 %s", oAfter.Status)
+	}
+	b, _ := e.svc.Storage.GetBatch(ctx, batch.ID)
+	if b.QtyFrozen != 0 || b.QtyAvailable != 500 {
+		t.Fatalf("审批失败后批次数量不应变化: %+v", b)
+	}
+	// 仅当为目标冷库 C-04 补写达标读数后审批才应成功。
+	e.setupSensors("C-04", 2)
+	current, _ := e.svc.Outbound.Get(ctx, o.ID)
+	if _, err := e.svc.Outbound.Approve(ctx, "tester", o.ID, current.Version); err != nil {
+		t.Fatalf("目标冷库自身补齐读数后审批应成功: %v", err)
+	}
+}
+
 // TestRuleActivation 同一规则编码仅一个启用版本，旧版本自动退役。
 func TestRuleActivation(t *testing.T) {
 	e := newTestEnv(t)

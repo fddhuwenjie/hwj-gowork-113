@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	"germplasm/internal/apperr"
@@ -443,15 +442,13 @@ func (s *OutboundService) releaseFreezes(ctx context.Context, tx *sql.Tx, o *dom
 func (s *OutboundService) evaluateWindow(ctx context.Context, tx *sql.Tx, rule *domain.RuleVersion, chamber string, eventAt time.Time, beforeHours, afterHours int) (domain.EnvWindowReport, error) {
 	start := eventAt.Add(-time.Duration(beforeHours) * time.Hour)
 	end := eventAt.Add(time.Duration(afterHours) * time.Hour)
-	queryChamber := chamber
-	if strings.Contains(chamber, "-") {
-		queryChamber = ""
-	}
-	tempReadings, err := s.base.repos.Sensors.ReadingsInWindow(ctx, tx, queryChamber, domain.MetricTemperature, start, end)
+	// 环境窗口严格绑定样本所在冷库：只取该 chamber 传感器的读数，绝不跨冷库聚合。
+	// 空 chamber 与样本未分配库位已在上游（Approve/Fulfill 校验 LocationID）拦截。
+	tempReadings, err := s.base.repos.Sensors.ReadingsInWindow(ctx, tx, chamber, domain.MetricTemperature, start, end)
 	if err != nil {
 		return domain.EnvWindowReport{}, err
 	}
-	humReadings, err := s.base.repos.Sensors.ReadingsInWindow(ctx, tx, queryChamber, domain.MetricHumidity, start, end)
+	humReadings, err := s.base.repos.Sensors.ReadingsInWindow(ctx, tx, chamber, domain.MetricHumidity, start, end)
 	if err != nil {
 		return domain.EnvWindowReport{}, err
 	}
