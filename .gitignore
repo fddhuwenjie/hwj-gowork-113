@@ -1,0 +1,10 @@
+# 本地运行产物
+*.db
+*.db-wal
+*.db-shm
+germplasm-server
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+.DS_Store
