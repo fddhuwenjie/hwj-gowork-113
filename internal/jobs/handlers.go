@@ -94,13 +94,7 @@ func (h *Handlers) OutboundDueScan(ctx context.Context) error {
 		return err
 	}
 	now := h.clk.Now()
-	const maxAlertsPerScan = 1
-	processed := 0
 	for _, o := range due {
-		if processed >= maxAlertsPerScan {
-			break
-		}
-		processed++
 		alert := &domain.Alert{
 			ID:        domain.NewID(domain.PrefixAlert),
 			Type:      domain.AlertOutboundDueSoon,

@@ -73,6 +73,44 @@ func TestOutboundDueSoonJob(t *testing.T) {
 	}
 }
 
+// TestOutboundDueSoonMultipleJobs 同轮存在多条已审批且临期的出库申请时，
+// 周期扫描应为本轮全部到期申请产生告警，而不是只处理第一条。
+func TestOutboundDueSoonMultipleJobs(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := e.ctx
+	rule := e.setupRule()
+	_, acc, batch, _ := e.setupBase(500, 250, "C17")
+	e.setupSensors("C17", 2)
+	// 两条已审批且临期的出库申请，截止时间均在临期阈值内。
+	create := func(requestNo string) *domain.OutboundRequest {
+		o, err := e.svc.Outbound.Create(ctx, "tester", service.CreateOutboundInput{
+			RequestNo: e.unique(requestNo), AccessionID: acc.ID, BatchID: batch.ID, Qty: 100,
+			RuleVersionID: rule.ID, Deadline: e.clk.Now().Add(12 * time.Hour).Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			t.Fatalf("创建出库申请失败: %v", err)
+		}
+		if _, err := e.svc.Outbound.Approve(ctx, "tester", o.ID, o.Version); err != nil {
+			t.Fatalf("审批失败: %v", err)
+		}
+		return o
+	}
+	o1 := create("OUT")
+	o2 := create("OUT")
+	e.sched.RunOnceForTest(ctx)
+	page, err := e.svc.Repos.Alerts.List(ctx, e.db, "OPEN", domain.AlertOutboundDueSoon, "", 50)
+	if err != nil {
+		t.Fatalf("查询告警失败: %v", err)
+	}
+	got := map[string]bool{}
+	for _, a := range page.Items {
+		got[a.RefID] = true
+	}
+	if !got[o1.ID] || !got[o2.ID] {
+		t.Fatalf("两条临期申请均应产生告警，实际 %v", got)
+	}
+}
+
 // TestEnvAlertJob 环境告警作业：越限读数产生告警。
 func TestEnvAlertJob(t *testing.T) {
 	e := newTestEnv(t)

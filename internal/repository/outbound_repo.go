@@ -137,9 +137,10 @@ func scanOutboundRows(rows *sql.Rows) (*domain.OutboundRequest, error) {
 }
 
 // ListApprovedDueBefore 查询截止时间早于 threshold 的已审批申请（临期巡检用）。
+// 覆盖本轮全部到期申请，不做截断，由调用方决定后续处理。
 func (r *OutboundRepo) ListApprovedDueBefore(ctx context.Context, q store.Queryer, threshold time.Time) ([]domain.OutboundRequest, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+outboundCols+` FROM outbound_requests
-		WHERE status='APPROVED' AND deadline <= ? ORDER BY deadline, id LIMIT 1`, clock.Format(threshold))
+		WHERE status='APPROVED' AND deadline <= ? ORDER BY deadline, id`, clock.Format(threshold))
 	if err != nil {
 		return nil, err
 	}
