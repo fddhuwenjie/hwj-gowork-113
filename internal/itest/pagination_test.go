@@ -85,3 +85,94 @@ func TestBatchPaginationFilter(t *testing.T) {
 		t.Fatalf("第二页应为 2 条且无下页游标")
 	}
 }
+
+// TestSensorPaginationByChamber 按冷库筛选传感器分页：翻页必须保持同一冷库范围，
+// 且不重不漏，不能混入其他冷库的设备。游标键应与排序键一致。
+func TestSensorPaginationByChamber(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := e.ctx
+	const chamberA = "COLD-A"
+	const chamberB = "COLD-B"
+	// 在 A 中注册足够多传感器，并穿插 B 冷库设备，迫使翻页跨页。
+	for i := 0; i < 25; i++ {
+		if _, err := e.svc.Sensors.CreateSensor(ctx, "tester", service.CreateSensorInput{
+			Code: e.unique("TEMP"), Chamber: chamberA, Metric: "TEMPERATURE",
+		}); err != nil {
+			t.Fatalf("创建 A 冷库传感器失败: %v", err)
+		}
+		// 穿插其他冷库设备，分页不得混入。
+		if _, err := e.svc.Sensors.CreateSensor(ctx, "tester", service.CreateSensorInput{
+			Code: e.unique("TEMP"), Chamber: chamberB, Metric: "TEMPERATURE",
+		}); err != nil {
+			t.Fatalf("创建 B 冷库传感器失败: %v", err)
+		}
+	}
+	seen := map[string]bool{}
+	cursor := ""
+	pages := 0
+	for {
+		page, err := e.svc.Sensors.ListSensors(ctx, chamberA, cursor, 10)
+		if err != nil {
+			t.Fatalf("分页查询失败: %v", err)
+		}
+		for _, s := range page.Items {
+			if s.Chamber != chamberA {
+				t.Fatalf("按冷库筛选混入其他冷库设备: %s", s.Chamber)
+			}
+			if seen[s.ID] {
+				t.Fatalf("分页结果重复: %s", s.ID)
+			}
+			seen[s.ID] = true
+		}
+		pages++
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		if pages > 10 {
+			t.Fatalf("分页未收敛")
+		}
+	}
+	if len(seen) != 25 {
+		t.Fatalf("分页应覆盖 A 冷库全部 25 台，实际 %d", len(seen))
+	}
+}
+
+// TestSensorPaginationSameTimestamp 同一时间戳下的稳定分页：游标键必须与 ORDER BY 的 id 一致，
+// 否则第二页会重复首页设备。
+func TestSensorPaginationSameTimestamp(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := e.ctx
+	// 同一假时钟时刻注册多台传感器，迫使 created_at 相同，依赖 id 二级排序。
+	for i := 0; i < 12; i++ {
+		if _, err := e.svc.Sensors.CreateSensor(ctx, "tester", service.CreateSensorInput{
+			Code: e.unique("TEMP"), Chamber: "COLD-S", Metric: "TEMPERATURE",
+		}); err != nil {
+			t.Fatalf("创建传感器失败: %v", err)
+		}
+	}
+	seen := map[string]bool{}
+	cursor := ""
+	for pages := 0; ; pages++ {
+		page, err := e.svc.Sensors.ListSensors(ctx, "COLD-S", cursor, 5)
+		if err != nil {
+			t.Fatalf("分页查询失败: %v", err)
+		}
+		for _, s := range page.Items {
+			if seen[s.ID] {
+				t.Fatalf("同一时间戳分页重复: %s", s.ID)
+			}
+			seen[s.ID] = true
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		if pages > 10 {
+			t.Fatalf("分页未收敛")
+		}
+	}
+	if len(seen) != 12 {
+		t.Fatalf("分页应覆盖全部 12 台，实际 %d", len(seen))
+	}
+}

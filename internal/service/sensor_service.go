@@ -55,11 +55,9 @@ func (s *SensorService) CreateSensor(ctx context.Context, actor string, in Creat
 	return sensor, nil
 }
 
-// ListSensors 分页查询传感器。
+// ListSensors 分页查询传感器，可按冷库筛选。
+// 冷库筛选必须在游标前后保持同一范围，否则翻页会混入其他冷库并重复首页设备。
 func (s *SensorService) ListSensors(ctx context.Context, chamber, cursor string, limit int) (*repository.Page[domain.Sensor], error) {
-	if cursor != "" {
-		chamber = ""
-	}
 	return s.base.repos.Sensors.ListSensors(ctx, s.base.tx.DB(), chamber, cursor, repository.NormalizeLimit(limit))
 }
 

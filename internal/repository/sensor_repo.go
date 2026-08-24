@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 
 	"germplasm/internal/apperr"
@@ -46,7 +47,9 @@ func (r *SensorRepo) GetSensor(ctx context.Context, q store.Queryer, id string) 
 	return &s, nil
 }
 
-// ListSensors 稳定分页查询传感器。
+// ListSensors 稳定分页查询传感器，可按冷库筛选。
+// 冷库筛选随游标一起作用于每一页，保证翻页范围一致；游标以 (created_at, id) 构造，
+// 与 ORDER BY 及 cursorCondition 完全对齐，避免重复或漏行。
 func (r *SensorRepo) ListSensors(ctx context.Context, q store.Queryer, chamber, cursor string, limit int) (*Page[domain.Sensor], error) {
 	c, err := DecodeCursor(cursor)
 	if err != nil {
@@ -77,7 +80,7 @@ func (r *SensorRepo) ListSensors(ctx context.Context, q store.Queryer, chamber, 
 		s.CreatedAt = clock.MustParse(createdAt)
 		items = append(items, s)
 	}
-	return paginate(items, limit, func(s domain.Sensor) (time.Time, string) { return s.CreatedAt, s.Code })
+	return paginate(items, limit, func(s domain.Sensor) (time.Time, string) { return s.CreatedAt, s.ID })
 }
 
 // ListSensorsByChamber 查询冷库中指定度量的在线传感器。
@@ -147,6 +150,7 @@ func (r *SensorRepo) LatestReading(ctx context.Context, q store.Queryer, sensorI
 }
 
 // ListReadings 稳定分页查询读数。
+// 游标以 (created_at, id) 构造，与 ORDER BY 及 cursorCondition 对齐。
 func (r *SensorRepo) ListReadings(ctx context.Context, q store.Queryer, sensorID string, cursor string, limit int) (*Page[domain.SensorReading], error) {
 	c, err := DecodeCursor(cursor)
 	if err != nil {
@@ -170,7 +174,7 @@ func (r *SensorRepo) ListReadings(ctx context.Context, q store.Queryer, sensorID
 		return nil, err
 	}
 	return paginate(items, limit, func(rd domain.SensorReading) (time.Time, string) {
-		return rd.CreatedAt, clock.Format(rd.RecordedAt) + "|" + rd.SensorID
+		return rd.CreatedAt, strconv.FormatInt(rd.ID, 10)
 	})
 }
 
